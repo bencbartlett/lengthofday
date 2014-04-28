@@ -42,11 +42,11 @@ gamma = 100000*yrsec                # Frequency modifier for Omega0 = omega0 + d
 deltaOmega = 2*pi/(21*3600*20)      # Amplitude modifier for Omega0 = omega00 + deltaOmega * sin(2pi/gamma*t)
 
 # Snowball Earth Variables
-deltaT = 5                         # Temperature change in snowball earth
+deltaT = 5                          # Temperature change in snowball earth
 snowballStart = .5*10**9 * yrsec    # When the snowball earth starts
 coolingTime = .3*10**9 * yrsec      # Time it takes to cool down by deltaT
 flatTime = .3*10**9 * yrsec         # How long it remains at cooler temperature
-warmingTime = 1*10**4 * yrsec      # Time it takes to warm back up
+warmingTime = 1*10**4 * yrsec       # Time it takes to warm back up
 coolingSlope = -deltaT/coolingTime
 warmingSlope = deltaT/warmingTime
 
