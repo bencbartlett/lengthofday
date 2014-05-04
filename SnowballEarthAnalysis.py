@@ -49,7 +49,7 @@ deltaT = 5                          # Temperature change in snowball earth
 snowballStart = .5*10**9 * yrsec    # When the snowball earth starts
 coolingTime = .3*10**9 * yrsec      # Time it takes to cool down by deltaT
 flatTime = .3*10**9 * yrsec         # How long it remains at cooler temperature
-warmingTime = 1*10**4 * yrsec       # Time it takes to warm back up
+warmingTime = 1*10**7 * yrsec       # Time it takes to warm back up
 coolingSlope = -deltaT/coolingTime
 warmingSlope = deltaT/warmingTime
 
