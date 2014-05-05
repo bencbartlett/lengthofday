@@ -27,9 +27,9 @@ Cp = 1.005                          # Atmospheric specific heat capacity at 300K
 T = Tnaught = 287                   # Surface temperature in K
 Rearth = 6378100                    # Meters
 Fnaught = 4.7 * 10**13              # Heat flux in W, according to http://www.solid-earth.net/1/5/2010/se-1-5-2010.pdf
-I = 1.5*10**37                      # Moment of Inertia of Earth
+I = 8*10**37                      # Moment of Inertia of Earth
 omeganaught = (g*h)**.5 / Rearth    # Natural resonance frequency of earth's atmosphere, comes out to 2*pi/21hr
-Q = 100                             # Q factor of the atmosphere
+Q = 1000                             # Q factor of the atmosphere
 tau = Q / omeganaught               # This assumes a Q factor of 100 from David Politzer's email
 moonT = -20*Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - omeganaught**2) + \
         2*pi/(24*3600)/(tau**2)) / (4*(2*pi/(24*3600)**2 - omeganaught**2)**2 + (2*pi/(24*3600)**2)/(tau**2))
@@ -39,16 +39,16 @@ moonT = -20*Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - 
 # Adjustable Simulation Parameters:-------------------------------------------------------------------------------------
 
 # Sinusoidal Noise:
-numSines = 5
+numSines = 1
 gamma = 1*10**7 * yrsec             # Frequency modifier for Omega0 = omega0 + deltaOmega * sin(2pi/gamma*t)
-deltaOmega = 2*pi/(21*3600*20)      # Amplitude modifier for Omega0 = omega00 + deltaOmega * sin(2pi/gamma*t)
+deltaOmega = 0*2*pi/(21*3600*20)      # Amplitude modifier for Omega0 = omega00 + deltaOmega * sin(2pi/gamma*t)
 
 
 # Snowball Earth Variables
 deltaT = 5                          # Temperature change in snowball earth
-snowballStart = .5*10**9 * yrsec    # When the snowball earth starts
-coolingTime = .3*10**9 * yrsec      # Time it takes to cool down by deltaT
-flatTime = .3*10**9 * yrsec         # How long it remains at cooler temperature
+snowballStart = .1*10**9 * yrsec    # When the snowball earth starts
+coolingTime = .1*10**9 * yrsec      # Time it takes to cool down by deltaT
+flatTime = .1*10**9 * yrsec         # How long it remains at cooler temperature
 warmingTime = 1*10**7 * yrsec       # Time it takes to warm back up
 coolingSlope = -deltaT/coolingTime
 warmingSlope = deltaT/warmingTime
@@ -57,8 +57,8 @@ warmingSlope = deltaT/warmingTime
 # Time and Initial Value Parameters
 tStep = 1000 * yrsec                # Step size in seconds for time variable
                                     # Note that at the moment, a small step size is required for accurate calculations.
-tmax = 1.5*10**9 * yrsec            # Age of earth in seconds; simulation stops when it reaches this value
-omegastart = 2*pi/(5*3600)          # 2pi/5hr - Initial LoD of Earth
+tmax = .6*10**9 * yrsec            # Age of earth in seconds; simulation stops when it reaches this value
+omegastart = 2*pi/(21*3600)          # 2pi/5hr - Initial LoD of Earth
 
 
 # Miscellaneous Parameters
@@ -141,7 +141,7 @@ def simulate(deltaOmega, gamma, tau):
     #plotSineNoise()
     while t <= tmax:
         print("Time: %.3f Myr   Omega: %.10f   Day length: %.10f   Temperature: %.10f"\
-            % (int(t/(yrsec*1000000)), omega, 2*pi/(3600*omega), T-273))
+            % (t/(yrsec*1000000), omega, 2*pi/(3600*omega), T-273))
         domega = (atmTorque(omega, t, tau, gamma, deltaOmega) - moonTorque(omega)) / I * tStep 
         omega += domega                                             # Increment omega
         dayLengthValues.append(2*pi/(3600*omega))                   # Store day length

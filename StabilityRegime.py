@@ -52,10 +52,10 @@ warmingSlope = deltaT/warmingTime
 
 
 # Time and Initial Value Parameters
-tStep = 1000 * yrsec                # Step size in seconds for time variable
+tStep = 500 * yrsec                 # Step size in seconds for time variable
                                     # Note that at the moment, a small step size is required for accurate calculations.
 tmax = 0.6*10**9 * yrsec            # Age of earth in seconds; simulation stops when it reaches this value
-omegastart = 2*pi/(21.06*3600)         # 2pi/5hr - Initial LoD of Earth
+omegastart = 2*pi/(21.06*3600)      # 2pi/5hr - Initial LoD of Earth
 
 
 # Miscellaneous Parameters
@@ -124,7 +124,7 @@ def snowballEarth(t, tStart, deltaT):
     return omegaTemperatureVariance
 
 def isStable(lastOmega):
-    '''Tests to see if the current LoD is near the resonance frequency.  Currently a vestigial function.'''
+    '''Tests to see if the current LoD is near the resonance frequency.'''
     if omeganaught/lastOmega < variance and omeganaught/lastOmega > 1/variance: # Tests to see if it's near resonance
         return True
     else:
@@ -183,7 +183,7 @@ def simulate(deltaOmega, gamma, tau, plotTrue):
     dayLengthValues = []
     torqueValues = []
     tempValues = []
-    #plotSineNoise()
+    # plotSineNoise()
     
     while t <= tmax:
         # print("Time: %.3f Myr   Omega: %.10f   Day length: %.10f   Temperature: %.10f"\
@@ -197,9 +197,8 @@ def simulate(deltaOmega, gamma, tau, plotTrue):
     
     if plotTrue:
         plot(dayLengthValues, tempValues)
-
-    omegaF = omegaValues[-1]                                        # Get last omega value of simulation
-    return isStable(omegaF)
+                                      
+    return isStable(omegaValues[-1])                                # Get last omega value of simulation
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -208,30 +207,45 @@ def simulate(deltaOmega, gamma, tau, plotTrue):
 
 def regimeSimulation():
     '''Simulates through a large number of variable combinations to find an area of stability-preserving conditions.'''
-    Qvals = 10
-    warmingVals = 10
-    stabilityArray = np.zeros((Qvals, warmingVals))
+    Qvals = 30
+    warmingVals = 30
+    stabilityArray = np.zeros((Qvals, warmingVals)) # These strings track the axes for easy input into Mathematica
     i = j = 0
 
-    for Qiterator in np.logspace(np.log10(30), np.log10(5000), Qvals):
+    stabilityQaxis = "{{"
+
+    for Qiterator in np.logspace(np.log10(30), np.log10(10000), Qvals):
         j = 0
+        stabilityWaxis = "{{"
         for warmingTimeIterator in np.logspace(np.log10(1000 * yrsec), np.log10(1*10**8 * yrsec), warmingVals):
             global tau                                              # Change the variables
+            global Q
             global warmingTime
             global warmingSlope
-            tau = Qiterator / omeganaught
+            Q = Qiterator
+            tau = Q / omeganaught
             warmingTime = warmingTimeIterator
             warmingSlope = deltaT / warmingTimeIterator
 
+            stabilityWaxis += ("{%d, %.1e}" % (j+1, warmingTimeIterator/yrsec))
+
             print("Simulating for Q = %.3e, Tau_w = %.3e.    Simulation %.0f%% complete." \
-                % (Qiterator, warmingTimeIterator, 100.0*(i*warmingVals + j)/(Qvals*warmingVals)))
+                % (Q, warmingTime, 100.0*(i*warmingVals + j)/(Qvals*warmingVals)))
+
             stabilityArray[i][j] = simulate(deltaOmega, gamma, tau, False) # Run simulation, store stability value
 
+            print("    -> Stability of resonance is %d." % int(stabilityArray[i][j]))
             j += 1
+
+        stabilityQaxis += ("{%d, %.1e}" % (i+1, Qiterator))
         i += 1
 
-    writeStabilityData(stabilityArray)
-    raw_input("Simulation complete.  Press enter to close this window.")
+    stabilityQaxis += "}}"
+    stabilityWaxis += "}}"
+
+    writeStabilityData(stabilityArray, stabilityQaxis, stabilityWaxis)
+    raw_input("Simulation complete. %d of the %d simulations preserved resonance. Press enter to close this window." \
+        % (np.count_nonzero(stabilityArray), Qvals*warmingVals))
 
 
 
@@ -265,8 +279,12 @@ def writedata(omegaValues, dayLengthValues, torqueValues, omegaF, stability, del
     filehandle.write("\n")
     filehandle.close()
 
-def writeStabilityData(stabilityValues):
+def writeStabilityData(stabilityValues, Qaxis, Waxis):
     np.savetxt("Stability Regime.dat", stabilityValues, fmt="%s", delimiter=",", newline="},\n{")
+    filehandle = open("AxesLabels.txt", "w")
+    filehandle.write("FrameTicks->{"+Qaxis+Waxis+"}")
+    filehandle.close()
+
 
 
 #-----------------------------------------------------------------------------------------------------------------------
