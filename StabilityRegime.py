@@ -1,4 +1,6 @@
 # Analysis of a Snowball Earth Model in Breaking Atmospheric Resonance
+# Ben Bartlett - Ph11 Research Project
+# Winter 2014 - Summer 2014
 
 #-----------------------------------------------------------------------------------------------------------------------
 
@@ -6,10 +8,11 @@
 # Importations
 #-----------------------------------------------------------------------------------------------------------------------
 
-from math import pi                # Cause I get tired of typing np.pi over and over and over agin...
-import numpy as np                 # We kind of need this
-import matplotlib.pyplot as plt    # Oooh, pretty graphs!
-import multiprocessing             # For super-duper-mega-speedarific(TM) computations
+from math import pi                 # Cause I get tired of typing np.pi over and over and over agin...
+import numpy as np                  # We kind of need this
+import matplotlib.pyplot as plt     # Oooh, pretty graphs!
+import multiprocessing              # For super-duper-mega-speedarific(TM) computations
+import time                         # So we can know what's going on when
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -24,22 +27,22 @@ yrsec = np.float64(31155690)        # Number of seconds in a year.  float64() us
 rho = 1.275                         # Column density of air at STP in kg/m^3
 Cp = 1.005                          # Atmospheric specific heat capacity at 300K, in J/(g*K)
 Rearth = 6378100                    # Meters
-Fnaught = 4.7 * 10**13              # Heat flux in W, according to http://www.solid-earth.net/1/5/2010/se-1-5-2010.pdf
-I = 8.0*10**37                      # Moment of Inertia of Earth
+Fnaught = 4.7*10**13 / 5.1*10**14   # Heat flux in W/m^2, from http://www.solid-earth.net/1/5/2010/se-1-5-2010.pdf
+I = np.float64(8.0*10**37)          # Moment of Inertia of Earth
 hnaught = 28644                     # Meters, just played around in wolfram alpha to find a value that works
 omeganaught = (g*hnaught)**.5/Rearth# Natural resonance frequency of earth's atmosphere, comes out to 2*pi/21hr
-Q = 100                             # Q factor of the atmosphere
-tau = Q / omeganaught               # This assumes a Q factor of 100 from David Politzer's email
 Tnaught = 287                       # Surface temperature in K
 
 # Lunar torque scaling
-moonT = -20*Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - omeganaught**2) + \
-        2*pi/(24*3600)/(tau**2)) / (4*(2*pi/(24*3600)**2 - omeganaught**2)**2 + (2*pi/(24*3600)**2)/(tau**2))
-                                    # Lunar torque is currently (negative) 20 times the atmospheric torque
-                                    # Note that we use Tnaught here for scaling purposes, not T
+moonT = np.float64(1 * 10**18)      # Current torque of moon on earth in Nm, according to Walker/Zahnle
+                                    # Scaling factor for atmospheric torque
 
 
 # Adjustable Simulation Parameters:-------------------------------------------------------------------------------------
+
+# Resolution for Q by Tau graph:
+Qvals = 8                           # For the moment, these need to be an integer multiple of numCores
+warmingVals = 8
 
 # Sinusoidal Noise:
 numSines = 0
@@ -48,7 +51,7 @@ deltaOmega = 0*2*pi/(21*3600*20)    # Amplitude modifier for Omega0 = omega00 + 
 
 
 # Snowball Earth Variables
-deltaT = 25                         # Temperature change in snowball earth
+deltaT = 25                         # Temperature change in K for snowball earth
 snowballStart = .1*10**9 * yrsec    # When the snowball earth starts
 coolingTime = .2*10**9 * yrsec      # Time it takes to cool down by deltaT
 flatTime = .1*10**9 * yrsec         # How long it remains at cooler temperature
@@ -61,10 +64,12 @@ flatTime = .1*10**9 * yrsec         # How long it remains at cooler temperature
 tStep = 500 * yrsec                 # Step size in seconds for time variable
                                     # Note that at the moment, a small step size is required for accurate calculations.
 tmax = 0.6*10**9 * yrsec            # Age of earth in seconds; simulation stops when it reaches this value
-omegastart = 2*pi/(21.06*3600)      # 2pi/5hr - Initial LoD of Earth
+#omegastart = 2*pi/(21.06*3600)      # 2pi/5hr - Initial LoD of Earth
+omegastart = 2*pi/(15*3600)
 
 
 # Miscellaneous Parameters
+numCores = multiprocessing.cpu_count() # Gets the number of cores on the computer to optimize number of processes
 variance = 1.05                     # Error bounds.  To be accepted as stable, 1/variance < omega/(2pi/21) < variance
 
 
@@ -82,15 +87,19 @@ def resonance(t, deltaOmega, gamma, T, h, coolingTime, coolingSlope, \
 
 def moonTorque(omega):
     '''Returns lunar torque.'''
-    return moonT * (omega/(2*pi/(24*3600)))**6                      # This should eventually be replaced by a 1/r^6 term
+    return -1* moonT * (omega/(2*pi/(24*3600)))**6                  # This should eventually be replaced by a 1/r^6 term
 
-def atmTorque(omega, t, tau, gamma, deltaOmega, T, h, coolingTime, \
+def atmTorque(omega, t, tau, A24, gamma, deltaOmega, T, h, coolingTime, \
     coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp):
     '''Returns atmospheric torque following the analytic solution that was solved for.'''
     omega0, newT, newh = resonance(t, deltaOmega, gamma, T, h, coolingTime, coolingSlope, \
         flatTime, warmingTime, warmingSlope, freq, phi, amp)
-    return -Fnaught/(2*rho*Cp*T) * (4*omega*(omega**2 - omega0**2) + omega/(tau**2))\
-        / (4*(omega**2 - omega0**2)**2 + (omega**2)/(tau**2)), newT, newh
+    # return -Fnaught/(2*rho*Cp*T) * (4*omega*(omega**2 - omega0**2) + omega/(tau**2))\
+    #     / (4*(omega**2 - omega0**2)**2 + (omega**2)/(tau**2)), newT, newh
+    #return -1/20 * moonT * (Fnaught/(2*rho*Cp*T) * (4*omega*(omega**2 - omega0**2) + omega/(tau**2))\
+    #    / (4*(omega**2 - omega0**2)**2 + (omega**2)/(tau**2))) / A24, newT, newh
+    return moonT/20 * (Fnaught/(2*rho*Cp*T) * (4*omega*(omega**2 - omega0**2) + omega/(tau**2))\
+        / (4*(omega**2 - omega0**2)**2 + (omega**2)/(tau**2))) / A24, newT, newh
 
 def whiteNoise(amplitude, avg):
     '''Returns white noise.'''
@@ -167,6 +176,41 @@ def plotSineNoise():
     plt.plot(x, y)
     plt.show()
 
+def plotTorque(Q):
+    '''Test function; plots atmospheric and lunar torque as a function of omega'''
+    t = 0                                                           # Reset time
+    T = Tnaught                                                     # Reset temperature
+    h = hnaught                                                     # Reset atmospheric height
+    freq, phi, amp = resetWave(deltaOmega, gamma)                   # Reset noise modifiers
+    # Do some calculations
+    tau = Q / omeganaught
+    coolingSlope = 0
+    warmingSlope = 0
+    warmingTime = 10**99
+    # Current atmospheric column height
+    A24 = Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - omeganaught**2) + \
+        2*pi/(24*3600)/(tau**2)) / (4*(2*pi/(24*3600)**2 - omeganaught**2)**2 + (2*pi/(24*3600)**2)/(tau**2))
+
+    moonTorques = []
+    atmTorques = []
+
+    lowerTimeLim = 15
+    upperTimeLim = 24
+
+    for dayLength in np.linspace(lowerTimeLim, upperTimeLim, 1000):
+        omega = (2*pi)/(3600*dayLength)
+        moonTorques.append(-moonTorque(omega))
+        atmTorques.append(atmTorque(omega, t, tau, A24, gamma, deltaOmega, T, h, coolingTime, \
+            coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)[0])
+
+    plt.xlim([lowerTimeLim, upperTimeLim])
+    plt.plot(np.linspace(lowerTimeLim, upperTimeLim, 1000), atmTorques, label = "Atmospheric torque")
+    plt.plot(np.linspace(lowerTimeLim, upperTimeLim, 1000), moonTorques, label = "-1 * Lunar torque")
+    plt.xlabel("Length of Day (hr)")
+    plt.ylabel("Torque (Nm)")
+    plt.legend()
+    plt.show()
+
 def sortClean(array, xdim, ydim):
     '''Sorts the processing results to make sure they are in order and cleans up the data by removing indices.'''
     newarray = np.zeros((xdim, ydim))
@@ -174,139 +218,6 @@ def sortClean(array, xdim, ydim):
         for j in range(ydim):
             newarray[array[i][j][1]][array[i][j][2]] = array[i][j][0] # Sort the arrays by indices
     return newarray
-
-    
-
-#-----------------------------------------------------------------------------------------------------------------------
-# Main simulation function
-#-----------------------------------------------------------------------------------------------------------------------
-
-def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, plotTrue):
-    '''Main simulation loop for 0 < t < tmax.'''
-    # Reset variables
-    omega = omegastart                                              # Reset angular velocity
-    t = 0                                                           # Reset time
-    T = Tnaught                                                     # Reset temperature
-    h = hnaught                                                     # Reset atmospheric height
-    freq, phi, amp = resetWave(deltaOmega, gamma)                   # Reset noise modifiers
-    # moonTorqueScalar(tau)                                         # Reset lunar torque modifier\
-
-    # Do some calculations
-    tau = Q / omeganaught
-    coolingSlope = np.float64(-deltaT/coolingTime)
-    warmingSlope = np.float64(deltaT/warmingTime)
-    # Initialize data storage arrays
-    omegaTimeValues = []
-    omegaValues = []
-    dayLengthValues = []
-    torqueValues = []
-    tempValues = []
-    # plotSineNoise()
-
-    # print tau, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, plotTrue
-    
-    counter = 0
-    while t <= tmax:
-        # if counter == 10000:
-        #     print("Time: %.3f Myr   Omega: %.10f   Day length: %.10f   Temperature: %.10f"\
-        #         % ((t/(yrsec*1000000)), omega, 2*pi/(3600*omega), T-273))
-        #     counter = 0
-
-        atmTorqueReults, newT, newh = atmTorque(omega, t, tau, gamma, deltaOmega, T, h, coolingTime, \
-            coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)
-        domega = (atmTorqueReults - moonTorque(omega)) / I * tStep 
-        omega += domega                                             # Increment omega
-        T, h = newT, newh                                           # Update temperature and column height values
-
-        dayLengthValues.append(2*pi/(3600*omega))                   # Store day length
-        omegaValues.append(omega)
-        tempValues.append(T - 273)
-
-        t += tStep                                                  # Increment 
-        counter += 1
-    
-    if plotTrue:
-        plot(dayLengthValues, tempValues)
-
-    queue.put([isStable(omegaValues[-1]), i, j])                    # For multiprocessing, put the return value to queue                   
-    return isStable(omegaValues[-1])                                # Get last omega value of simulation
-
-
-#-----------------------------------------------------------------------------------------------------------------------
-# Main Loop
-#-----------------------------------------------------------------------------------------------------------------------
-
-def regimeSimulation():
-    '''Simulates through a large number of variable combinations to find an area of stability-preserving conditions.'''
-    queue = multiprocessing.Queue() # Initialize a multiprocessing queue for communication between processes
-    numCores = multiprocessing.cpu_count() # Gets the number of cores on the computer to optimize number of processes
-
-    Qvals = 96 # For the moment, these need to be an integer multiple of numCores
-    warmingVals = 96
-    stabilityArray = np.zeros((Qvals, warmingVals), dtype = (int, 3)) # Initial unsorted array output
-    i = j = 0 # Counter variables to track position
-
-    stabilityQaxis = "{{" # These strings track the axes for easy input into Mathematica
-
-    for Q in np.logspace(np.log10(10000), np.log10(30), Qvals):
-        stabilityWaxis = "{{"
-        for warmingTime in np.logspace(np.log10(1000 * yrsec), np.log10(1*10**8 * yrsec), warmingVals):
-
-            stabilityWaxis += ("{%d, %.1e}," % (j+1, warmingTime/yrsec))
-
-            # print Q, warmingTime
-            # if j % numCores == numCores - 1: # Gets the values if full or finished
-            #     for index in np.arange(numCores):
-            #         print("  > Attempting to recover array element %d, %d..." % (i, j+index-numCores))
-            #         stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of possibly out of order results
-            #         print "  >> Array element recovered."
-
-            # if j == warmingVals-1:
-            #     rng = warmingVals % numCores
-            #     if rng == 0:
-            #         rng = numCores
-            #     for index in np.arange(rng):
-            #         print(">Attempting to recover array element %d, %d..." % (i, j+index-numCores))
-            #         stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of possibly out of order results
-            #         print ">>Array element recovered."
-
-            print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." \
-                % (Q, warmingTime, warmingTime/yrsec))
-            process = multiprocessing.Process(target = simulate, args = (deltaOmega, gamma, Q, deltaT, snowballStart,\
-                coolingTime, flatTime, warmingTime, queue, i, j, False,)) # Start a simulation process
-            process.start() # Start the process    
-            
-            j += 1 # Increment j.  The placement of this matters.
-
-            if j % numCores == 0: # Gets the values if full or finished
-                for index in np.arange(numCores):
-                    print("  > Attempting to recover array element %d, %d..." % (i, j+index-numCores))
-                    stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of possibly out of order results
-                    print "  >> Array element recovered."
-
-        stabilityQaxis += ("{%d, %.1e}," % (i+1, Q))
-        j = 0 # Reset index variable
-        i += 1 # Increment
-        print "\n"
-        print("---> Simulation %.0d%% complete.\n" % int(100.0*i/Qvals)) # Give progress report
-
-    stabilityQaxis = stabilityQaxis[:-1] + "}, None}"
-    stabilityWaxis = stabilityWaxis[:-1] + "}, None}"
-
-    print "Parsing array..."
-    stabilityArray = sortClean(stabilityArray, Qvals, warmingVals) # Sort the array to make sure it is in order
-
-    writeStabilityData(stabilityArray, stabilityQaxis, stabilityWaxis)
-    raw_input("Simulation complete. %d of the %d simulations preserved resonance.\nPress enter to close this window." \
-        % (np.count_nonzero(stabilityArray), Qvals*warmingVals))
-
-
-
-
-def main():
-    '''Main loop over multiple possible variables.'''
-    print "Simulating with deltaOmega="+str(deltaOmega)+", gamma="+str(gamma)+"..."
-    simulate(deltaOmega, gamma, tau, deltaT, snowballStart, coolingTime, flatTime, warmingTime, True)
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -338,6 +249,166 @@ def writeStabilityData(stabilityValues, Qaxis, Waxis):
     filehandle.write("FrameTicks->{"+Qaxis+","+Waxis+"}")
     filehandle.close()
 
+def showStabilityData(stabilityValues, Qaxis, Waxis):
+    '''Displays a pretty plot :P'''
+    Qstr = ["%.1e" % val for val in Qaxis]
+    Wstr = ["%.1e" % val for val in Waxis]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    cax = ax.matshow(data)
+
+    ax.set_xticklabels(['']+Wstr)
+    ax.set_xlabel('Tau_W')
+    ax.set_yticklabels(['']+Qstr)
+    ax.set_ylabel('Q')
+    plt.show()
+
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Main simulation function
+#-----------------------------------------------------------------------------------------------------------------------
+
+def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, \
+    printTrue, plotTrue):
+    '''Main simulation loop for 0 < t < tmax.'''
+    # Reset variables
+    omega = omegastart                                              # Reset angular velocity
+    t = 0                                                           # Reset time
+    T = Tnaught                                                     # Reset temperature
+    h = hnaught                                                     # Reset atmospheric height
+    freq, phi, amp = resetWave(deltaOmega, gamma)                   # Reset noise modifiers
+    # moonTorqueScalar(tau)                                         # Reset lunar torque modifier\
+
+    # Do some calculations
+    tau = Q / omeganaught
+    coolingSlope = np.float64(-deltaT/coolingTime)
+    warmingSlope = np.float64(deltaT/warmingTime)
+    # Initialize data storage arrays
+    omegaTimeValues = []
+    omegaValues = []
+    dayLengthValues = []
+    torqueValues = []
+    tempValues = []
+
+    # Current atmospheric column height
+    A24 = Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - omeganaught**2) + \
+        2*pi/(24*3600)/(tau**2)) / (4*(2*pi/(24*3600)**2 - omeganaught**2)**2 + (2*pi/(24*3600)**2)/(tau**2))
+    # plotSineNoise()
+
+    # print tau, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, plotTrue
+    
+    counter = 0
+    while t <= tmax:
+        if counter == 1000 and printTrue:
+            print("Time: %.3f Myr   Omega: %.10f   Day length: %.10f   Temperature: %.10f"\
+                % ((t/(yrsec*1000000)), omega, 2*pi/(3600*omega), T-273))
+            counter = 0
+
+        atmTorqueReults, newT, newh = atmTorque(omega, t, tau, A24, gamma, deltaOmega, T, h, coolingTime, \
+            coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)
+        domega = (atmTorqueReults + moonTorque(omega)) / I * tStep 
+        omega += domega                                             # Increment omega
+        T, h = newT, newh                                           # Update temperature and column height values
+
+        dayLengthValues.append(2*pi/(3600*omega))                   # Store day length
+        omegaValues.append(omega)
+        tempValues.append(T - 273)
+
+        t += tStep                                                  # Increment 
+        counter += 1
+    
+    if plotTrue:
+        plot(dayLengthValues, tempValues)
+
+    queue.put([isStable(omegaValues[-1]), i, j])                    # For multiprocessing, put the return value to queue                   
+    return isStable(omegaValues[-1])                                # Get last omega value of simulation
+
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Main Loop
+#-----------------------------------------------------------------------------------------------------------------------
+
+def regimeSimulation():
+    '''Simulates through a large number of variable combinations to find an area of stability-preserving conditions.'''
+    queue = multiprocessing.Queue() # Initialize a multiprocessing queue for communication between processes
+    startTime = time.clock()
+
+    stabilityArray = np.zeros((Qvals, warmingVals), dtype = (int, 3)) # Initial unsorted array output
+    i = j = 0 # Counter variables to track position
+
+    stabilityQaxis = "{{" # These strings track the axes for easy input into Mathematica
+
+    QevaluationValues = np.logspace(np.log10(10000), np.log10(30), Qvals)
+    WevaluationValues = np.logspace(np.log10(1000 * yrsec), np.log10(1*10**8 * yrsec), warmingVals)
+
+    for Q in QevaluationValues:
+        stabilityWaxis = "{{"
+        for warmingTime in WevaluationValues:
+
+            stabilityWaxis += ("{%d, %.1e}," % (j+1, warmingTime/yrsec))
+
+            # print Q, warmingTime
+            # if j % numCores == numCores - 1: # Gets the values if full or finished
+            #     for index in np.arange(numCores):
+            #         print("  > Attempting to recover array element %d, %d..." % (i, j+index-numCores))
+            #         stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of unordered results
+            #         print "  >> Array element recovered."
+
+            # if j == warmingVals-1:
+            #     rng = warmingVals % numCores
+            #     if rng == 0:
+            #         rng = numCores
+            #     for index in np.arange(rng):
+            #         print(">Attempting to recover array element %d, %d..." % (i, j+index-numCores))
+            #         stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of unordered results
+            #         print ">>Array element recovered."
+
+            print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." \
+                % (Q, warmingTime, warmingTime/yrsec))
+            process = multiprocessing.Process(target = simulate, args = (deltaOmega, gamma, Q, deltaT, snowballStart,\
+                coolingTime, flatTime, warmingTime, queue, i, j, False, False,)) # Start a simulation process
+            process.start() # Start the process    
+            
+            j += 1 # Increment j.  The placement of this matters.
+
+            if j % numCores == 0: # Gets the values if full or finished
+                for index in np.arange(numCores):
+                    print("  > Attempting to recover array element %d, %d..." % (i, j+index-numCores))
+                    stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of unordered results
+                    print "  >> Array element recovered."
+
+        stabilityQaxis += ("{%d, %.1e}," % (i+1, Q))
+        j = 0 # Reset index variable
+        i += 1 # Increment
+        print "\n"
+
+        timeEstimate = (1-i/Qvals)*(Qvals/i)*(time.clock() - startTime)/(3600)
+
+        print("---> Simulation %.0d%% complete. Estimated time remaining: %.2f hr.\n" % \
+            (int(100.0*i/Qvals),  timeEstimate)) # Give progress report
+
+    stabilityQaxis = stabilityQaxis[:-1] + "}, None}"
+    stabilityWaxis = stabilityWaxis[:-1] + "}, None}"
+
+    print "Parsing array..."
+    stabilityArray = sortClean(stabilityArray, Qvals, warmingVals) # Sort the array to make sure it is in order
+
+    writeStabilityData(stabilityArray, stabilityQaxis, stabilityWaxis)
+    showStabilityData(stabilityArray, QevaluationValues, WevaluationValues)
+    raw_input("Simulation complete. %d of the %d simulations preserved resonance.\nPress enter to close this window." \
+        % (np.count_nonzero(stabilityArray), Qvals*warmingVals))
+
+
+def main():
+    '''Main loop over multiple possible variables.'''
+    print "Simulating with deltaOmega=" + str(deltaOmega) + ", gamma=" + str(gamma) + "..."
+    queue = multiprocessing.Queue()
+    Q = 100                             # Q factor of the atmosphere
+    warmingTime = 2 * 10**7 * yrsec
+    i=j=0
+    plotTorque(Q)
+    simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, True, True)
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -345,5 +416,5 @@ def writeStabilityData(stabilityValues, Qaxis, Waxis):
 #-----------------------------------------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    # main()
+    #main()
     regimeSimulation()
