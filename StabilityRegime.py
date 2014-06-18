@@ -57,7 +57,7 @@ flatTime = .1*10**9 * yrsec         # How long it remains at cooler temperature
 
 
 # Time and Initial Value Parameters
-tStep = 500 * yrsec                 # Step size in seconds for time variable
+tStep = 100 * yrsec                 # Step size in seconds for time variable
                                     # Note that at the moment, a small step size is required for accurate calculations.
 tmax = 0.6*10**9 * yrsec            # Simulation stops when it reaches this time value
 #omegastart = 2*pi/(21.06*3600)      # 2pi/5hr - Initial LoD of Earth
@@ -71,7 +71,9 @@ variance = 1.025                    # Error bounds.  To be accepted as stable, 1
 # Resolution for Q by Tau graph:
 Qvals = 8
 warmingVals = 8
-QevaluationValues = np.logspace(np.log10(10000), np.log10(30), Qvals)
+tempVals = 1
+TevaluationValues = [25]
+QevaluationValues = np.linspace(300, 30, Qvals)
 WevaluationValues = np.logspace(np.log10(1000 * yrsec), np.log10(1*10**8 * yrsec), warmingVals)
 
 
@@ -329,15 +331,41 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
 
     return isStable(omegaValues[-1])                                # Get last omega value of simulation
 
+def testSimulate(value):
+    if value >= 505:
+        return True
+    else:
+        return False
 
-def binarySearchRegime(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, \
-    printTrue):
-    '''Same thing as the regimeSimulation() function, except instead of simulating every value, it searches for
-    the boundary of the stability-nonstability region.'''
+def binarySearchRegime(Q, deltaT, Qindex, Tindex, queue, printTrue = False, putToQueue = False):
+    '''Same thing as the regimeSimulation() function, except instead of simulating every value; it searches for
+    the boundary of the stability-nonstability region by iterating over warmingTime for a given Q and deltaT.'''
+    lowerBound = 0
+    upperBound = warmingVals - 1
+    wPosition = int(np.mean([lowerBound, upperBound])) # Start at the middle of the w-values array
     while True:
-        simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, \
-        False, False, False) # Simulate 
+        # Simulate the function to see if it's stable or not
 
+        result = simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, \
+            WevaluationValues[wPosition], queue, Qindex, Tindex, \
+            printTrue = False, plotTrue = False, putToQueue = False)
+        # print wPosition
+        # result = testSimulate(wPosition)
+        if result == True:  # If simulation is stable, everything right of it ("above" it) is stable
+            upperBound = wPosition
+            if wPosition == int(np.mean([lowerBound, upperBound])): # If no change in position
+                if putToQueue:
+                    queue.put([Qindex, wPosition, Tindex])
+                return wPosition   # Returns the last stable value
+            wPosition = int(np.mean([lowerBound, upperBound]))
+
+        else:  # If simulation is not stable, everything "below" it is not stable
+            lowerBound = wPosition
+            if wPosition == int(np.mean([lowerBound, upperBound])):  # If no change in position
+                if putToQueue:
+                    queue.put([Qindex, wPosition, Tindex])
+                return wPosition  # Returns the last stable value
+            wPosition = int(np.mean([lowerBound, upperBound]))
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -349,55 +377,61 @@ def regimeSimulation():
     queue = multiprocessing.Queue() # Initialize a multiprocessing queue for communication between processes
     startTime = time.clock()
 
-    stabilityArray = np.zeros((Qvals, warmingVals), dtype = (int, 3)) # Initial unsorted array output
-    i = j = currentProcesses = 0 # Counter variables to track position
+    stabilityArray = np.zeros((Qvals, warmingVals, tempVals)) # Initial unsorted array output
+    i = j = k = currentProcesses = 0 # Counter variables to track position
     iPos = jPos = 0 # Position variables to track array placement
 
     stabilityQaxis = "{{" # These strings track the axes for easy input into Mathematica
 
     for Q in QevaluationValues:
-        stabilityWaxis = "{{"
-        for warmingTime in WevaluationValues:
+        # Start the binary search fo a given Q, T pair
+        print("Starting binary search for Q = %.3e, deltaT = %.3eK." \
+                % (Q, deltaT))
+        # Start a simulation process
+        process = multiprocessing.Process(target = binarySearchRegime, args = (Q, deltaT, i, k, queue, True, True,))
+        process.start() # Start the process 
+        currentProcesses += 1 # Increment number of processes
 
+        # Retrieve results
+        if currentProcesses == numCores or i == Qvals - 1: # Gets the values if full or finished
+            recoveryAttempts = min(currentProcesses, (Qvals - iPos))
+            print "\n"
+            for index in np.arange(recoveryAttempts):
+                print("  > Attempting to recover array row %d..." % iPos)
+                result = queue.get() # Get the unsorted array of unordered results
+                stabilityArray[result[0], result[1]:, result[2]] = 1 # Sets all w values above boundary to stable
+                print ("  >> Array element recovered for (Q,dT) = (%d,%d). Set all tw values above %d to stable." \
+                    % (result[0], result[2], result[1]))
+                iPos += 1
+            currentProcesses = 0 # Reset number of processes
+            print "\n"
+
+        stabilityWaxis = "{{"
+
+        for warmingTime in WevaluationValues:
             if j % 8 == 0:
                 stabilityWaxis += ("{%d, %.1e}," % (j+1, warmingTime/yrsec))
 
-            # print Q, warmingTime
-            # if j % numCores == numCores - 1: # Gets the values if full or finished
-            #     for index in np.arange(numCores):
-            #         print("  > Attempting to recover array element %d, %d..." % (i, j+index-numCores))
-            #         stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of unordered results
-            #         print "  >> Array element recovered."
-
-            # if j == warmingVals-1:
-            #     rng = warmingVals % numCores
-            #     if rng == 0:
-            #         rng = numCores
-            #     for index in np.arange(rng):
-            #         print(">Attempting to recover array element %d, %d..." % (i, j+index-numCores))
-            #         stabilityArray[i][j+index-numCores] = queue.get() # Get the unsorted array of unordered results
-            #         print ">>Array element recovered."
-
-            print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." \
-                % (Q, warmingTime, warmingTime/yrsec))
-            process = multiprocessing.Process(target = simulate, args = (deltaOmega, gamma, Q, deltaT, snowballStart,\
-                coolingTime, flatTime, warmingTime, queue, i, j, False, False, True,)) # Start a simulation process
-            process.start() # Start the process    
+            # print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." \
+            #     % (Q, warmingTime, warmingTime/yrsec))
+            # process = multiprocessing.Process(target = simulate, args = (deltaOmega, gamma, Q, deltaT, snowballStart,\
+            #     coolingTime, flatTime, warmingTime, queue, i, j, False, False, True,)) # Start a simulation process
+            # process.start() # Start the process    
             
-            j += 1 # Increment j.  The placement of this matters.
-            currentProcesses += 1 # Increment number of processes
+            # j += 1 # Increment j.  The placement of this matters.
+            # currentProcesses += 1 # Increment number of processes
 
-            if currentProcesses == numCores or (i==Qvals-1 and j==warmingVals-1): # Gets the values if full or finished
-                recoveryAttempts = min(currentProcesses, (Qvals*warmingVals - (iPos*warmingVals + jPos)) )
-                for index in np.arange(recoveryAttempts):
-                    print("  > Attempting to recover array element (%d,%d)..." % (iPos, jPos))
-                    stabilityArray[iPos][jPos] = queue.get() # Get the unsorted array of unordered results
-                    print "  >> Array element recovered."
-                    jPos += 1
-                    if jPos > warmingVals - 1:
-                        jPos = 0
-                        iPos += 1
-                currentProcesses = 0 # Reset number of processes
+            # if currentProcesses == numCores or (i==Qvals-1 and j==warmingVals-1): # Gets the values if full or finished
+            #     recoveryAttempts = min(currentProcesses, (Qvals*warmingVals - (iPos*warmingVals + jPos)) )
+            #     for index in np.arange(recoveryAttempts):
+            #         print("  > Attempting to recover array element (%d,%d)..." % (iPos, jPos))
+            #         stabilityArray[iPos][jPos] = queue.get() # Get the unsorted array of unordered results
+            #         print "  >> Array element recovered."
+            #         jPos += 1
+            #         if jPos > warmingVals - 1:
+            #             jPos = 0
+            #             iPos += 1
+            #     currentProcesses = 0 # Reset number of processes
 
         if i % 4 == 0:
             stabilityQaxis += ("{%d, %.1e}," % (i+1, Q))
@@ -414,7 +448,7 @@ def regimeSimulation():
     stabilityWaxis = stabilityWaxis[:-1] + "}, None}"
 
     print "Parsing array..."
-    stabilityArray = sortClean(stabilityArray, Qvals, warmingVals) # Sort the array to make sure it is in order
+    # stabilityArray = sortClean(stabilityArray, Qvals, warmingVals) # Sort the array to make sure it is in order
 
     writeStabilityData(stabilityArray, stabilityQaxis, stabilityWaxis)
     # showStabilityData(stabilityArray, QevaluationValues, WevaluationValues)
@@ -431,7 +465,7 @@ def singleSimulation():
     i=j=0
     # plotTorque(Q)
     simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, \
-        True, True, False)
+        printTrue = True, plotTrue = True, putToQueue = False)
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -439,5 +473,7 @@ def singleSimulation():
 #-----------------------------------------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    #singleSimulation()
-    regimeSimulation()
+    singleSimulation()
+    #regimeSimulation()
+    #binarySearchRegime(100, 25)
+
