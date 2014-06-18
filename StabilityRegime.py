@@ -48,33 +48,35 @@ deltaOmega = 0*2*pi/(21*3600*20)    # Amplitude modifier for Omega0 = omega00 + 
 
 # Snowball Earth Variables
 deltaT = 25                         # Temperature change in K for snowball earth
-snowballStart = .1*10**9 * yrsec    # When the snowball earth starts
-coolingTime = .2*10**9 * yrsec      # Time it takes to cool down by deltaT
-flatTime = .1*10**9 * yrsec         # How long it remains at cooler temperature
-# warmingTime = 1*10**7 * yrsec       # Time it takes to warm back up
+snowballStart = 1*10**6 * yrsec     # When the snowball earth starts
+coolingTime = 1 * 1*10**6 * yrsec   # Time it takes to cool down by deltaT
+flatTime = 1 * 1*10**6 * yrsec      # How long it remains at cooler temperature
+postWarmingTime = 2*10**6 * yrsec   # Padding after global warmup
+# warmingTime = 1*10**7 * yrsec     # Time it takes to warm back up
 # coolingSlope = -deltaT/coolingTime
 # warmingSlope = deltaT/warmingTime
 
 
 # Time and Initial Value Parameters
-tStep = 100 * yrsec                 # Step size in seconds for time variable
+tStep = 50 * yrsec                  # Step size in seconds for time variable
                                     # Note that at the moment, a small step size is required for accurate calculations.
-tmax = 0.6*10**9 * yrsec            # Simulation stops when it reaches this time value
-#omegastart = 2*pi/(21.06*3600)      # 2pi/5hr - Initial LoD of Earth
-omegastart = 2*pi/(15*3600)
+# tmax = 0.6*10**9 * yrsec          # Simulation stops when it reaches this time value
+# omegastart = 2*pi/(21.06*3600)    # 2pi/5hr - Initial LoD of Earth
+omegastart = 2*pi/(21*3600)
 
 
 # Miscellaneous Parameters
-numCores = multiprocessing.cpu_count() # Gets the number of cores on the computer to optimize number of processes
-variance = 1.025                    # Error bounds.  To be accepted as stable, 1/variance < omega/(2pi/21) < variance
+numCores = multiprocessing.cpu_count()  # Gets the number of cores on the computer to optimize number of processes
+variance = 1.025                        # Error bounds.  To be stable, 1/variance < omega/(2pi/21) < variance
 
-# Resolution for Q by Tau graph:
-Qvals = 8
-warmingVals = 8
-tempVals = 1
-TevaluationValues = [25]
-QevaluationValues = np.linspace(300, 30, Qvals)
-WevaluationValues = np.logspace(np.log10(1000 * yrsec), np.log10(1*10**8 * yrsec), warmingVals)
+# Resolution for Q by Tau graph:    # The entire algorithm should run in n^2*log(n) time
+Qvals = 75                           # This runs in n time
+warmingVals = 75                    # This runs in log(n) time
+tempVals = 75                        # This runs in n time
+# QevaluationValues = np.linspace(300, 30, Qvals)
+QevaluationValues = np.logspace(np.log10(1), np.log10(500), Qvals)
+WevaluationValues = np.logspace(np.log10(1 * yrsec), np.log10(1*10**6 * yrsec), warmingVals)
+TevaluationValues = np.linspace(0, 35, tempVals)  # Temperature should be in increasing order
 
 
 
@@ -82,10 +84,10 @@ WevaluationValues = np.logspace(np.log10(1000 * yrsec), np.log10(1*10**8 * yrsec
 # Subfunctions
 #-----------------------------------------------------------------------------------------------------------------------
 
-def resonance(t, deltaOmega, gamma, T, h, coolingTime, coolingSlope, \
+def resonance(t, deltaOmega, gamma, deltaT, T, h, coolingTime, coolingSlope, \
     flatTime, warmingTime, warmingSlope, freq, phi, amp):
     '''Returns current resonance frequency of earth from several functions.'''
-    snowballResults, newT, newh = snowballEarth(t, snowballStart, T, h,\
+    snowballResults, newT, newh = snowballEarth(t, snowballStart, deltaT, T, h,\
         coolingTime, coolingSlope, flatTime, warmingTime, warmingSlope)
     return omeganaught + snowballResults + sineNoise(t, deltaOmega, gamma, freq, phi, amp), newT, newh
 
@@ -93,15 +95,11 @@ def moonTorque(omega):
     '''Returns lunar torque.'''
     return -1* moonT * (omega/(2*pi/(24*3600)))**6                  # This should eventually be replaced by a 1/r^6 term
 
-def atmTorque(omega, t, tau, A24, gamma, deltaOmega, T, h, coolingTime, \
+def atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, coolingTime, \
     coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp):
     '''Returns atmospheric torque following the analytic solution that was solved for.'''
-    omega0, newT, newh = resonance(t, deltaOmega, gamma, T, h, coolingTime, coolingSlope, \
+    omega0, newT, newh = resonance(t, deltaOmega, gamma, deltaT, T, h, coolingTime, coolingSlope, \
         flatTime, warmingTime, warmingSlope, freq, phi, amp)
-    # return -Fnaught/(2*rho*Cp*T) * (4*omega*(omega**2 - omega0**2) + omega/(tau**2))\
-    #     / (4*(omega**2 - omega0**2)**2 + (omega**2)/(tau**2)), newT, newh
-    #return -1/20 * moonT * (Fnaught/(2*rho*Cp*T) * (4*omega*(omega**2 - omega0**2) + omega/(tau**2))\
-    #    / (4*(omega**2 - omega0**2)**2 + (omega**2)/(tau**2))) / A24, newT, newh
     return moonT/20 * (Fnaught/(2*rho*Cp*T) * (4*omega*(omega**2 - omega0**2) + omega/(tau**2))\
         / (4*(omega**2 - omega0**2)**2 + (omega**2)/(tau**2))) / A24, newT, newh
 
@@ -126,13 +124,15 @@ def sineNoise(t, deltaOmega, gamma, freq, phi, amp):
     else:
         return 0
 
-def snowballEarth(t, tStart, T, h, coolingTime, coolingSlope, flatTime, warmingTime, warmingSlope):
+def snowballEarth(t, tStart, deltaT, T, h, coolingTime, coolingSlope, flatTime, warmingTime, warmingSlope):
     '''Returns a resonance frequency  waveform similar to that present in a snowball earth climate model.'''
     # Add or subtract temperature to simulate the climate change
     if t >= tStart and t < tStart + coolingTime:
         T += coolingSlope * tStep
     elif t >= tStart + coolingTime and t < tStart + coolingTime + flatTime:
         pass
+    # if t == 0:
+    #     T -= deltaT
     elif t >= tStart + coolingTime + flatTime and t < tStart + coolingTime + flatTime + warmingTime:
         T += warmingSlope * tStep
     h = hnaught * T/Tnaught
@@ -204,7 +204,7 @@ def plotTorque(Q):
     for dayLength in np.linspace(lowerTimeLim, upperTimeLim, 1000):
         omega = (2*pi)/(3600*dayLength)
         moonTorques.append(-moonTorque(omega))
-        atmTorques.append(atmTorque(omega, t, tau, A24, gamma, deltaOmega, T, h, coolingTime, \
+        atmTorques.append(atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, coolingTime, \
             coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)[0])
 
     plt.xlim([lowerTimeLim, upperTimeLim])
@@ -240,19 +240,32 @@ def writedata(omegaValues, dayLengthValues, torqueValues, omegaF, stability, del
     filehandle.write("\n")
     filehandle.close()
     
-    filename = "Perturbation Analysis Results.dat"                  # Write to overall cumulative file
+    filename = "Perturbation Analysis Results.dat"  # Write to overall cumulative file
     filehandle = open(filename, "a")
     print "Writing data to cumulative file..."
     filehandle.write("{"+str(deltaOmega)+","+str(gamma)+","+str(omegaF)+","+str(stability)+"}, ")
     filehandle.write("\n")
     filehandle.close()
 
+def stabilityBoundary(stabilityValues):
+    stabilityBoundary = np.zeros((Qvals, warmingVals))
+    for T in range(tempVals):
+        for Q in range(Qvals):
+            # This sets the (Q,tw) element of the projection array to the current T value, finding the boundary,
+            # allowing it to be used with functions such as the ListPlot3D[] function in Mathematica.
+            stabilityBoundary[Q, np.nonzero(stabilityValues[T,Q])[0]] = TevaluationValues[T]
+    return stabilityBoundary
+
 def writeStabilityData(stabilityValues, Qaxis, Waxis):
-    np.savetxt("Stability Regime Copypaste.dat", stabilityValues, fmt="%s", delimiter=",", newline="},\n{")
-    np.savetxt('StabilityRegime.dat', stabilityValues, fmt = '%i', delimiter = ',') # Exports CSV format
+    np.savetxt('StabilityRegime.dat', stabilityBoundary(stabilityValues), fmt = '%i', delimiter = ',') # Write boundary
+    # np.savetxt("Stability Regime Copypaste.dat", stabilityValues, fmt="%s", delimiter=",", newline="},\n{")
+    for T in range(tempVals):
+        np.savetxt('StabilityRegimeT=%d.dat' % int(TevaluationValues[T]), stabilityValues[T], \
+            fmt = '%i', delimiter = ',')  # Exports individual array slices to CSV format
     filehandle = open("AxesLabels.txt", "w")
     filehandle.write("FrameTicks->{"+Qaxis+","+Waxis+"}")
     filehandle.close()
+    np.savetxt('StabilityRegime.dat', stabilityBoundary(stabilityValues), fmt = '%i', delimiter = ',')
 
 def showStabilityData(stabilityValues, Qaxis, Waxis):
     '''Displays a pretty plot :P'''
@@ -283,9 +296,10 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
     T = Tnaught                                                     # Reset temperature
     h = hnaught                                                     # Reset atmospheric height
     freq, phi, amp = resetWave(deltaOmega, gamma)                   # Reset noise modifiers
-    # moonTorqueScalar(tau)                                         # Reset lunar torque modifier\
+    # moonTorqueScalar(tau)                                         # Reset lunar torque modifier
 
     # Do some calculations
+    tmax = snowballStart + coolingTime + flatTime + warmingTime + postWarmingTime  # Total simulation time
     tau = Q / omeganaught
     coolingSlope = np.float64(-deltaT/coolingTime)
     warmingSlope = np.float64(deltaT/warmingTime)
@@ -310,7 +324,7 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
                 % ((t/(yrsec*1000000)), omega, 2*pi/(3600*omega), T-273))
             counter = 0
 
-        atmTorqueReults, newT, newh = atmTorque(omega, t, tau, A24, gamma, deltaOmega, T, h, coolingTime, \
+        atmTorqueReults, newT, newh = atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, coolingTime, \
             coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)
         domega = (atmTorqueReults + moonTorque(omega)) / I * tStep 
         omega += domega                                             # Increment omega
@@ -331,11 +345,9 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
 
     return isStable(omegaValues[-1])                                # Get last omega value of simulation
 
-def testSimulate(value):
-    if value >= 505:
-        return True
-    else:
-        return False
+#-----------------------------------------------------------------------------------------------------------------------
+# Binary Search for Stability-Instability Boundary
+#-----------------------------------------------------------------------------------------------------------------------
 
 def binarySearchRegime(Q, deltaT, Qindex, Tindex, queue, printTrue = False, putToQueue = False):
     '''Same thing as the regimeSimulation() function, except instead of simulating every value; it searches for
@@ -345,17 +357,19 @@ def binarySearchRegime(Q, deltaT, Qindex, Tindex, queue, printTrue = False, putT
     wPosition = int(np.mean([lowerBound, upperBound])) # Start at the middle of the w-values array
     while True:
         # Simulate the function to see if it's stable or not
+        if printTrue:
+            print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." % \
+                (Q, WevaluationValues[wPosition], WevaluationValues[wPosition]/yrsec))
 
         result = simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, \
             WevaluationValues[wPosition], queue, Qindex, Tindex, \
             printTrue = False, plotTrue = False, putToQueue = False)
-        # print wPosition
-        # result = testSimulate(wPosition)
+
         if result == True:  # If simulation is stable, everything right of it ("above" it) is stable
             upperBound = wPosition
             if wPosition == int(np.mean([lowerBound, upperBound])): # If no change in position
                 if putToQueue:
-                    queue.put([Qindex, wPosition, Tindex])
+                    queue.put([Tindex, Qindex, wPosition])
                 return wPosition   # Returns the last stable value
             wPosition = int(np.mean([lowerBound, upperBound]))
 
@@ -363,7 +377,7 @@ def binarySearchRegime(Q, deltaT, Qindex, Tindex, queue, printTrue = False, putT
             lowerBound = wPosition
             if wPosition == int(np.mean([lowerBound, upperBound])):  # If no change in position
                 if putToQueue:
-                    queue.put([Qindex, wPosition, Tindex])
+                    queue.put([Tindex, Qindex, wPosition])
                 return wPosition  # Returns the last stable value
             wPosition = int(np.mean([lowerBound, upperBound]))
 
@@ -377,72 +391,75 @@ def regimeSimulation():
     queue = multiprocessing.Queue() # Initialize a multiprocessing queue for communication between processes
     startTime = time.clock()
 
-    stabilityArray = np.zeros((Qvals, warmingVals, tempVals)) # Initial unsorted array output
+    stabilityArray = np.zeros((tempVals, Qvals, warmingVals)) # Initial unsorted array output
     i = j = k = currentProcesses = 0 # Counter variables to track position
     iPos = jPos = 0 # Position variables to track array placement
 
-    stabilityQaxis = "{{" # These strings track the axes for easy input into Mathematica
+    for deltaT in TevaluationValues: # Uses k index
+        stabilityQaxis = "{{" # These strings track the axes for easy input into Mathematica
+        i = iPos = 0
+        for Q in QevaluationValues: # Uses i index
+            # Start the binary search fo a given Q, T pair
+            print("Starting binary search for Q = %.3e, deltaT = %.3eK." % (Q, deltaT))
+            # Start a simulation process
+            process = multiprocessing.Process(target = binarySearchRegime, args=(Q, deltaT, i, k, queue, False, True,))
+            process.start() # Start the process 
+            currentProcesses += 1 # Increment number of processes
 
-    for Q in QevaluationValues:
-        # Start the binary search fo a given Q, T pair
-        print("Starting binary search for Q = %.3e, deltaT = %.3eK." \
-                % (Q, deltaT))
-        # Start a simulation process
-        process = multiprocessing.Process(target = binarySearchRegime, args = (Q, deltaT, i, k, queue, True, True,))
-        process.start() # Start the process 
-        currentProcesses += 1 # Increment number of processes
+            # Retrieve results
+            if currentProcesses == numCores or (i==Qvals-1 and k==tempVals-1): # Gets the values if full or finished
+                recoveryAttempts = currentProcesses
+                print "\n"
+                for index in np.arange(recoveryAttempts):
+                    print("  > Attempting to recover array row %d..." % iPos)
+                    result = queue.get() # Get the unsorted array of unordered results
+                    if result[2] < (warmingVals-1) - 1: # Accounts for computational hangups of non-resonance
+                        stabilityArray[result[0], result[1], result[2]:] = 1 # Sets all w values above bound to stable
+                    print ("    >> Array element recovered for (Q,dT) = (%d,%d). Set all tw values above %d to stable."\
+                        % (result[1], result[0], result[2]) )
+                    iPos += 1
+                currentProcesses = 0 # Reset number of processes
+                print "\n"
 
-        # Retrieve results
-        if currentProcesses == numCores or i == Qvals - 1: # Gets the values if full or finished
-            recoveryAttempts = min(currentProcesses, (Qvals - iPos))
-            print "\n"
-            for index in np.arange(recoveryAttempts):
-                print("  > Attempting to recover array row %d..." % iPos)
-                result = queue.get() # Get the unsorted array of unordered results
-                stabilityArray[result[0], result[1]:, result[2]] = 1 # Sets all w values above boundary to stable
-                print ("  >> Array element recovered for (Q,dT) = (%d,%d). Set all tw values above %d to stable." \
-                    % (result[0], result[2], result[1]))
-                iPos += 1
-            currentProcesses = 0 # Reset number of processes
-            print "\n"
+            stabilityWaxis = "{{"
 
-        stabilityWaxis = "{{"
+            for warmingTime in WevaluationValues:  # Uses j index
+                if j % 8 == 0:
+                    stabilityWaxis += ("{%d, %.1e}," % (j+1, warmingTime/yrsec))
 
-        for warmingTime in WevaluationValues:
-            if j % 8 == 0:
-                stabilityWaxis += ("{%d, %.1e}," % (j+1, warmingTime/yrsec))
+                # print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." \
+                #     % (Q, warmingTime, warmingTime/yrsec))
+                # process = multiprocessing.Process(target = simulate, \
+                #     args = (deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, \
+                #     queue, i, j, False, False, True,)) # Start a simulation process
+                # process.start() # Start the process    
+                
+                # j += 1 # Increment j.  The placement of this matters.
+                # currentProcesses += 1 # Increment number of processes
 
-            # print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." \
-            #     % (Q, warmingTime, warmingTime/yrsec))
-            # process = multiprocessing.Process(target = simulate, args = (deltaOmega, gamma, Q, deltaT, snowballStart,\
-            #     coolingTime, flatTime, warmingTime, queue, i, j, False, False, True,)) # Start a simulation process
-            # process.start() # Start the process    
-            
-            # j += 1 # Increment j.  The placement of this matters.
-            # currentProcesses += 1 # Increment number of processes
+                # if currentProcesses == numCores or (i==Qvals-1 and j==warmingVals-1): # Gets the values if finished
+                #     recoveryAttempts = min(currentProcesses, (Qvals*warmingVals - (iPos*warmingVals + jPos)) )
+                #     for index in np.arange(recoveryAttempts):
+                #         print("  > Attempting to recover array element (%d,%d)..." % (iPos, jPos))
+                #         stabilityArray[iPos][jPos] = queue.get() # Get the unsorted array of unordered results
+                #         print "  >> Array element recovered."
+                #         jPos += 1
+                #         if jPos > warmingVals - 1:
+                #             jPos = 0
+                #             iPos += 1
+                #     currentProcesses = 0 # Reset number of processes
 
-            # if currentProcesses == numCores or (i==Qvals-1 and j==warmingVals-1): # Gets the values if full or finished
-            #     recoveryAttempts = min(currentProcesses, (Qvals*warmingVals - (iPos*warmingVals + jPos)) )
-            #     for index in np.arange(recoveryAttempts):
-            #         print("  > Attempting to recover array element (%d,%d)..." % (iPos, jPos))
-            #         stabilityArray[iPos][jPos] = queue.get() # Get the unsorted array of unordered results
-            #         print "  >> Array element recovered."
-            #         jPos += 1
-            #         if jPos > warmingVals - 1:
-            #             jPos = 0
-            #             iPos += 1
-            #     currentProcesses = 0 # Reset number of processes
+            if i % 4 == 0:
+                stabilityQaxis += ("{%d, %.1e}," % (i+1, Q))
+            j = 0 # Reset index variable
+            i += 1 # Increment
 
-        if i % 4 == 0:
-            stabilityQaxis += ("{%d, %.1e}," % (i+1, Q))
-        j = 0 # Reset index variable
-        i += 1 # Increment
-        print "\n"
-
-        timeEstimate = (1-i/Qvals)*(Qvals/i)*(time.clock() - startTime)/(3600)
-
-        print("---> Simulation %.0d%% complete. Estimated time remaining: %.2f hr.\n" % \
-            (int(100.0*i/Qvals),  timeEstimate)) # Give progress report
+        k += 1
+        timeEstimate = (time.clock() - startTime)/(60) * (tempVals/(k+1) - 1)
+        timeHr = timeEstimate / 60
+        timeMin = timeEstimate - 60 * timeHr
+        print("---> Simulation %.0d%% complete. Estimated time remaining: %i hr, %i min.\n" \
+                % (int(100.0 * k / tempVals),  timeHr, timeMin) ) # Give progress report
 
     stabilityQaxis = stabilityQaxis[:-1] + "}, None}"
     stabilityWaxis = stabilityWaxis[:-1] + "}, None}"
@@ -453,19 +470,26 @@ def regimeSimulation():
     writeStabilityData(stabilityArray, stabilityQaxis, stabilityWaxis)
     # showStabilityData(stabilityArray, QevaluationValues, WevaluationValues)
     raw_input("Simulation complete. %d of the %d simulations preserved resonance.\nPress enter to close this window." \
-        % (np.count_nonzero(stabilityArray), Qvals*warmingVals))
+        % (np.count_nonzero(stabilityArray), Qvals*warmingVals*tempVals))
 
 
 def singleSimulation():
     '''Main loop over multiple possible variables.'''
     print "Simulating with deltaOmega=" + str(deltaOmega) + ", gamma=" + str(gamma) + "..."
     queue = multiprocessing.Queue()
-    Q = 100                             # Q factor of the atmosphere
+    Q = 100  # Q factor of the atmosphere
     warmingTime = 1 * 10**7 * yrsec
     i=j=0
-    # plotTorque(Q)
+    plotTorque(Q)
     simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, \
         printTrue = True, plotTrue = True, putToQueue = False)
+
+def singleBinarySearch():
+    '''Single binary search implementation for testing purposes.'''
+    deltaT = 25
+    Q = 100
+    queue = multiprocessing.Queue()
+    binarySearchRegime(Q, deltaT, 0, 0, queue, True, False)
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -473,7 +497,7 @@ def singleSimulation():
 #-----------------------------------------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    singleSimulation()
-    #regimeSimulation()
-    #binarySearchRegime(100, 25)
+    #singleSimulation()
+    regimeSimulation()
+    #singleBinarySearch()
 
