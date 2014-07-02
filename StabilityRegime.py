@@ -1,6 +1,5 @@
 # Analysis of a Snowball Earth Model in Breaking Atmospheric Resonance
-# Ben Bartlett - Ph11 Research Project
-# Winter 2014 - Summer 2014
+# Ben Bartlett - Ph11 Research
 
 #-----------------------------------------------------------------------------------------------------------------------
 
@@ -8,11 +7,11 @@
 # Importations
 #-----------------------------------------------------------------------------------------------------------------------
 
-from math import pi                 # Cause I get tired of typing np.pi over and over and over agin...
-import numpy as np                  # We kind of need this
-import matplotlib.pyplot as plt     # Oooh, pretty graphs!
-import multiprocessing              # For super-duper-mega-speedarific(TM) computations
-import time                         # So we can know what's going on when
+from math import pi                 #
+import numpy as np                  # 
+import matplotlib.pyplot as plt     # 
+import multiprocessing              # 
+import time                         # 
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -58,24 +57,21 @@ postWarmingTime = 2*10**6 * yrsec   # Padding after global warmup
 
 
 # Time and Initial Value Parameters
-tStep = 50 * yrsec                  # Step size in seconds for time variable
-                                    # Note that at the moment, a small step size is required for accurate calculations.
-# tmax = 0.6*10**9 * yrsec          # Simulation stops when it reaches this time value
-# omegastart = 2*pi/(21.06*3600)    # 2pi/5hr - Initial LoD of Earth
-omegastart = 2*pi/(21*3600)
+tStep = 50 * yrsec                  # Step size in seconds for time variable, small step size for accuracy with high Q
+omegastart = 2*pi/(21*3600)         # Starts at resonant frequency
 
 
 # Miscellaneous Parameters
 numCores = multiprocessing.cpu_count()  # Gets the number of cores on the computer to optimize number of processes
-variance = 1.025                        # Error bounds.  To be stable, 1/variance < omega/(2pi/21) < variance
+variance = 1.025                        # Error bounds.  To be stable, 1/variance < omega/(2pi/21*3600) < variance
 
 # Resolution for Q by Tau graph:    # The entire algorithm should run in n^2*log(n) time
-Qvals = 75                           # This runs in n time
-warmingVals = 75                    # This runs in log(n) time
-tempVals = 75                        # This runs in n time
-# QevaluationValues = np.linspace(300, 30, Qvals)
-QevaluationValues = np.logspace(np.log10(1), np.log10(500), Qvals)
-WevaluationValues = np.logspace(np.log10(1 * yrsec), np.log10(1*10**6 * yrsec), warmingVals)
+Qvals = 50                          # This runs in n time
+warmingVals = 50                    # This runs in log(n) time
+tempVals = 75                       # This runs in n time
+
+QevaluationValues = np.logspace(np.log10(30), np.log10(500), Qvals)
+WevaluationValues = np.logspace(np.log10(100 * yrsec), np.log10(1*10**6 * yrsec), warmingVals)
 TevaluationValues = np.linspace(0, 35, tempVals)  # Temperature should be in increasing order
 
 
@@ -91,7 +87,7 @@ def resonance(t, deltaOmega, gamma, deltaT, T, h, coolingTime, coolingSlope, \
         coolingTime, coolingSlope, flatTime, warmingTime, warmingSlope)
     return omeganaught + snowballResults + sineNoise(t, deltaOmega, gamma, freq, phi, amp), newT, newh
 
-def moonTorque(omega):
+def moonTorque(omega): # (!)
     '''Returns lunar torque.'''
     return -1* moonT * (omega/(2*pi/(24*3600)))**6                  # This should eventually be replaced by a 1/r^6 term
 
@@ -131,8 +127,6 @@ def snowballEarth(t, tStart, deltaT, T, h, coolingTime, coolingSlope, flatTime, 
         T += coolingSlope * tStep
     elif t >= tStart + coolingTime and t < tStart + coolingTime + flatTime:
         pass
-    # if t == 0:
-    #     T -= deltaT
     elif t >= tStart + coolingTime + flatTime and t < tStart + coolingTime + flatTime + warmingTime:
         T += warmingSlope * tStep
     h = hnaught * T/Tnaught
@@ -258,7 +252,6 @@ def stabilityBoundary(stabilityValues):
 
 def writeStabilityData(stabilityValues, Qaxis, Waxis):
     np.savetxt('StabilityRegime.dat', stabilityBoundary(stabilityValues), fmt = '%i', delimiter = ',') # Write boundary
-    # np.savetxt("Stability Regime Copypaste.dat", stabilityValues, fmt="%s", delimiter=",", newline="},\n{")
     for T in range(tempVals):
         np.savetxt('StabilityRegimeT=%d.dat' % int(TevaluationValues[T]), stabilityValues[T], \
             fmt = '%i', delimiter = ',')  # Exports individual array slices to CSV format
@@ -296,7 +289,6 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
     T = Tnaught                                                     # Reset temperature
     h = hnaught                                                     # Reset atmospheric height
     freq, phi, amp = resetWave(deltaOmega, gamma)                   # Reset noise modifiers
-    # moonTorqueScalar(tau)                                         # Reset lunar torque modifier
 
     # Do some calculations
     tmax = snowballStart + coolingTime + flatTime + warmingTime + postWarmingTime  # Total simulation time
@@ -313,9 +305,9 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
     # Current atmospheric column height
     A24 = Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - omeganaught**2) + \
         2*pi/(24*3600)/(tau**2)) / (4*(2*pi/(24*3600)**2 - omeganaught**2)**2 + (2*pi/(24*3600)**2)/(tau**2))
-    # plotSineNoise()
-
-    # print tau, deltaT, snowballStart, coolingTime, flatTime, warmingTime, queue, i, j, plotTrue
+    
+    if plotTrue:
+        plotSineNoise()
     
     counter = 0
     while t <= tmax:
@@ -427,32 +419,10 @@ def regimeSimulation():
                 if j % 8 == 0:
                     stabilityWaxis += ("{%d, %.1e}," % (j+1, warmingTime/yrsec))
 
-                # print("Starting simulation thread for Q = %.3e, Tau_w = %.3es = %.3e yr." \
-                #     % (Q, warmingTime, warmingTime/yrsec))
-                # process = multiprocessing.Process(target = simulate, \
-                #     args = (deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, \
-                #     queue, i, j, False, False, True,)) # Start a simulation process
-                # process.start() # Start the process    
-                
-                # j += 1 # Increment j.  The placement of this matters.
-                # currentProcesses += 1 # Increment number of processes
-
-                # if currentProcesses == numCores or (i==Qvals-1 and j==warmingVals-1): # Gets the values if finished
-                #     recoveryAttempts = min(currentProcesses, (Qvals*warmingVals - (iPos*warmingVals + jPos)) )
-                #     for index in np.arange(recoveryAttempts):
-                #         print("  > Attempting to recover array element (%d,%d)..." % (iPos, jPos))
-                #         stabilityArray[iPos][jPos] = queue.get() # Get the unsorted array of unordered results
-                #         print "  >> Array element recovered."
-                #         jPos += 1
-                #         if jPos > warmingVals - 1:
-                #             jPos = 0
-                #             iPos += 1
-                #     currentProcesses = 0 # Reset number of processes
-
             if i % 4 == 0:
                 stabilityQaxis += ("{%d, %.1e}," % (i+1, Q))
-            j = 0 # Reset index variable
-            i += 1 # Increment
+            j = 0  # Reset index variable
+            i += 1  # Increment
 
         k += 1
         timeEstimate = (time.clock() - startTime)/(60) * (tempVals/(k+1) - 1)
@@ -464,7 +434,7 @@ def regimeSimulation():
     stabilityQaxis = stabilityQaxis[:-1] + "}, None}"
     stabilityWaxis = stabilityWaxis[:-1] + "}, None}"
 
-    print "Parsing array..."
+    # print "Parsing array..."
     # stabilityArray = sortClean(stabilityArray, Qvals, warmingVals) # Sort the array to make sure it is in order
 
     writeStabilityData(stabilityArray, stabilityQaxis, stabilityWaxis)
@@ -500,4 +470,3 @@ if __name__ == '__main__':
     #singleSimulation()
     regimeSimulation()
     #singleBinarySearch()
-
