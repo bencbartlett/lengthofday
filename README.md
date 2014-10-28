@@ -1,5 +1,6 @@
-Length of Day Project
+Geophysical Research Letters:
+"Computational analysis of a Precambrian resonance-stabilized day length"
 Ben Bartlett
 ====================
 
-Atmospheric resonance and length of day project.
+Source code for GRL project - simulation code has been consolodated to the StabilityRegime.py file.
