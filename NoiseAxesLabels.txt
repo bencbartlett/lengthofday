@@ -1,1 +1,0 @@
-FrameTicks->{{}, None},{}, None}}

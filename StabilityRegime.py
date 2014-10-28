@@ -27,8 +27,11 @@ yrsec = np.float64(31155690)        # Number of seconds in a year.  float64() us
 rho = 1.275                         # Column density of air at STP in kg/m^3
 Cp = 1.005                          # Atmospheric specific heat capacity at 300K, in J/(g*K)
 Rearth = 6378100                    # Meters
+Rroche = 9.496 * 10**6              # Solid Roche limit of Earth in m
+Vroche = 6.447 * 10**3              # Orbital velocity in m/s at roche limit
 Fnaught = 4.7*10**13 / 5.1*10**14   # Heat flux in W/m^2, from http://www.solid-earth.net/1/5/2010/se-1-5-2010.pdf
 I = np.float64(8.04*10**37)         # Moment of Inertia of Earth, kgm^2
+Mmoon = np.float64(7.347*10**22)    # Lunar mass, kg
 hnaught = 28644                     # Meters, just played around in wolfram alpha to find a value that works
 omeganaught = (g*hnaught)**.5/Rearth# Natural resonance frequency of earth's atmosphere, comes out to 2*pi/21hr
 Tnaught = 287                       # Surface temperature in K
@@ -36,6 +39,11 @@ Tnaught = 287                       # Surface temperature in K
 # Lunar torque scaling
 moonT = np.float64(6 * 10**16)      # Precambrian lunar torque was 6E23 dyne-cm = 6E16 Nm, according to Zahnle paper
                                     # Scaling factor for atmospheric torque
+
+# Initial total angular momentum of earth moon system
+L0 = I*(2*pi/(5*3600)) + Mmoon * Rroche * Vroche
+
+
 
 # Adjustable Simulation Parameters:-------------------------------------------------------------------------------------
 
@@ -53,17 +61,17 @@ phiEvaluationValues = np.linspace(0, 2*pi, phiVals+1)[:-1]
 
 # Snowball Earth Variables
 deltaT = 25                         # Temperature change in K for snowball earth (singlesimulation only)
-snowballStart = 2*10**8 * yrsec     # When the snowball earth starts
+snowballStart = 4.54*10**9 * yrsec - (6.5*10**8 + 20*10**6)*yrsec     # When the snowball earth starts
 coolingTime = 1 * 1*10**5 * yrsec   # Time it takes to cool down by deltaT
-flatTime = 5 * 10**7 * yrsec        # How long it remains at cooler temperature
+flatTime = 2.5 * 10**7 * yrsec        # How long it remains at cooler temperature
 postWarmingTime = 1*10**8 * yrsec   # Padding after global warmup
 # warmingTime = 1*10**7 * yrsec     # Time it takes to warm back up
 # coolingSlope = -deltaT/coolingTime
 # warmingSlope = deltaT/warmingTime
 
 # Time and Initial Value Parameters
-tStep = 250 * yrsec                # Step size in seconds for time variable, small step size for accuracy with high Q
-omegastart = 2*pi/(3600*21)         # Starts at resonant frequency
+tStep = 25000 * yrsec                # Step size in seconds for time variable, small step size for accuracy with high Q
+omegastart = 2*pi/(3600*7)         # Starts at resonant frequency
 defaultTMax = 2*10**8 * yrsec       # Default value for tmax if snowballTrue = False
 
 # Miscellaneous Parameters
@@ -97,9 +105,20 @@ def resonance(t, deltaOmega, gamma, deltaT, T, h, snowballTrue, snowballStart, c
         newOmegaNaught = omeganaught*(newh/hnaught)
     return newOmegaNaught, newT, newh
 
-def moonTorque(omega): # (!) Replace value with correct scaling
+def moonTorque(omega, t, tmax): # (!) Replace value with correct scaling
     '''Returns lunar torque.'''
-    return -1* moonT # * (omega/(2*pi/(24*3600)))**6             # This should eventually be replaced by a 1/r^6 term
+    # return -1 * moonT # * (omega/(2*pi/(24*3600)))**6             # This should eventually be replaced by a 1/r^6 term
+    # See math, r\propto(L-Iw_earth)^2
+    return -1 * moonT * (t/tmax) * np.float64( (L0 - I * (2*pi/(24*3600)) )**2 / ((L0 - I * omega)**2) )**6
+    # Moon couldn't have started at roche limit, since it is orbiting faster than earth is rotating, which would speed
+    # earth up and slow moon down, causing it to crash into earth
+    # The t/tmax is given to take into account the gradually increasing lunar torque over time, likely due to tidal
+    # heating of the mantle, outgassing of water from the mantle, formation of oceans, etc.
+
+    # Note that the linear scaling won't really matter for small day length values, since the predominating 1/r^6 term
+    # will outweigh this, but accounts for the increase in base lunar torque since the Precambrian period cited in
+    # Zahnle and Walker 1987.
+
 
 def atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, snowballTrue, snowballStart, coolingTime, \
     coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp):
@@ -208,24 +227,55 @@ def isStableNoiseInclusive(omegaValues, searchLength, printTrue = False):
 # Auxilliary Functions
 #-----------------------------------------------------------------------------------------------------------------------
 
-def plotData(dayValues, tempValues, title):
+def invisibleSpines(ax):
+    ax.set_frame_on(True)
+    ax.patch.set_visible(False)
+    for sp in ax.spines.itervalues():
+        sp.set_visible(False)
+
+def plotData(dayValues, tempValues, tmax, title, atmTorques = False, lunarTorques = False):
     '''Plots the overall LoD and temperature values over time.'''
+    timescale = np.linspace(0, (tmax/yrsec)/1000000, len(dayValues))
+    lowerDayLength = 5
+    upperDayLength = 25
     fig, ax1 = plt.subplots()
     # Plot temperature values
     ax2 = ax1.twinx()
-    ax2.plot(tempValues, 'r')
+    ax2.plot(timescale, tempValues, 'r')
     ax2.set_ylabel('Average Temperature (C)', color='r')
-    ax2.set_ylim([Tnaught-273 - 50, Tnaught-273 + 50])              # Set reasonable range and convert K to C
+    ax2.set_ylim([Tnaught-273 - 100, Tnaught-273 + 50])              # Set reasonable range and convert K to C
     for tl in ax2.get_yticklabels():
         tl.set_color('r')
+
     # Plot day length values
-    ax1.plot(dayValues, 'b')
-    ax1.set_xlabel("Time (step units)")                             # Stops too soon; convert to yr rather than steps
+    ax1.plot(timescale, dayValues, 'b')
+    ax1.set_xlabel("Time (Myr)")                             
     ax1.set_ylabel("Length of Day (hr)", color='b')
-    ax1.set_ylim([19,23])
+    ax1.set_ylim([lowerDayLength, upperDayLength])
     for tl in ax1.get_yticklabels():
         tl.set_color('b')
+
+    if atmTorques:
+        ax3 = ax1.twinx()
+        # ax3.spines["right"].set_position(("axes", 1.2))
+        # invisibleSpines(ax3)
+        # ax3.spines["right"].set_visible(True)
+        ax3.plot(timescale, atmTorques, 'm')
+        ax3.set_ylabel('Atmospheric Torques (Nm)', color='m')
+        ax3.set_ylim([2 * np.min(atmTorques), 3 * 2 * np.max(atmTorques)]) 
+        for tl in ax3.get_yticklabels():
+            tl.set_color('m')
+
+    if lunarTorques:
+        ax4 = ax1.twinx()
+        ax4.plot(timescale, lunarTorques, 'g')
+        ax4.set_ylabel('Lunar Torques (Nm)', color='g')
+        ax4.set_ylim([0, np.min(lunarTorques)]) 
+        for tl in ax4.get_yticklabels():
+            tl.set_color('g')
+
     # Show plot
+    plt.xlim([0, 4500])
     plt.title(title)
     plt.show()
 
@@ -261,12 +311,12 @@ def plotTorque(Q):
     moonTorques = []
     atmTorques = []
 
-    lowerTimeLim = 15                                               # Lower LoD time limit, hr.
+    lowerTimeLim = 5                                                # Lower LoD time limit, hr.
     upperTimeLim = 24                                               # Upper LoD time limit, hr.
 
     for dayLength in np.linspace(lowerTimeLim, upperTimeLim, 1000):
         omega = (2*pi)/(3600*dayLength)
-        moonTorques.append(-moonTorque(omega))
+        moonTorques.append(-moonTorque(omega, 1, 1))
         atmTorques.append(atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, False, snowballStart, \
             coolingTime, coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)[0])
 
@@ -371,8 +421,6 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
     amp = noiseAmplitude
     phi = noisePhi
 
-    stepPeriod = int(10000000 * yrsec / (tStep * testSteps))        # Checks the last 10M years for stability
-
     # Do some calculations
     if snowballTrue:
         tmax = snowballStart + coolingTime + flatTime + warmingTime + postWarmingTime  # Total simulation time
@@ -394,9 +442,6 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
     A24 = Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - omeganaught**2) + \
         2*pi/(24*3600)/(tau**2)) / (4*(2*pi/(24*3600)**2 - omeganaught**2)**2 + (2*pi/(24*3600)**2)/(tau**2))
     
-    if plotTrue:
-        plotSineNoise(noiseAmplitude, gamma, freq, phi)
-    
     counter = 0
     while t <= tmax:
         if counter == 1000 and printTrue:
@@ -404,13 +449,14 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
                 % ((t/(yrsec*1000000)), omega, 2*pi/(3600*omega), T-273))
             counter = 0
 
-        atmTorqueReults, newT, newh, omega0 = atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, \
+
+        atmTorqueResults, newT, newh, omega0 = atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, \
             snowballTrue, snowballStart, coolingTime, coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)
 
         if omega0 < minOmega0:
             minOmega0 = omega0
 
-        domega = (atmTorqueReults + moonTorque(omega)) / I * tStep 
+        domega = (atmTorqueResults + moonTorque(omega, t, tmax)) / I * tStep 
         omega += domega                                                 # Increment omega
         T, h = newT, newh                                               # Update temperature and column height values
 
@@ -421,11 +467,12 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
         t += tStep                                                      # Increment 
         counter += 1
 
+
     if printTrue:
         print "Stability: " + str(isStableNoiseInclusive(omegaValues, 2*stepPeriod, True))
 
     if plotTrue:
-        plotData(dayLengthValues, tempValues, "Index: ("+str(i)+","+str(j)+\
+        plotData(dayLengthValues, tempValues, tmax, "Index: ("+str(i)+","+str(j)+\
             "), Period: "+str(int(1/freq))+", Amp: "+str(amp))
 
     if putToQueue:
@@ -438,6 +485,83 @@ def simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime,
         return isStableNoiseInclusive(omegaValues, 2*stepPeriod)        # Temperature inclusive values for noise regimes
     else:
         return isStable(omegaValues[-1])                                # Get last omega value of simulation
+
+#-----------------------------------------------------------------------------------------------------------------------
+# LoD Over Earth's History - Used in generating figure in paper
+#-----------------------------------------------------------------------------------------------------------------------
+
+def lodHistory(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, \
+    noiseFrequency, noiseAmplitude, noisePhi, queue, i, j, k, printTrue, plotTrue, putToQueue, snowballTrue, isNoise,
+    dataDump):
+    '''Main simulation loop for 0 < t < tmax.'''
+    # Reset variables
+    omega = omegastart                                              # Reset angular velocity
+    t = 0                                                           # Reset time
+    T = Tnaught                                                     # Reset temperature
+    h = hnaught                                                     # Reset atmospheric height
+    #freq, phi, amp = resetWave(deltaOmega, gamma)                  # Reset noise modifiers
+    freq = noiseFrequency
+    amp = noiseAmplitude
+    phi = noisePhi
+
+    stepPeriod = int(10000000 * yrsec / (tStep * testSteps))        # Checks the last 10M years for stability
+
+    # Do some calculations
+    tmax = 4.52 * 10**9 * yrsec                                     # Age of Moon in years
+    tau = Q / omeganaught
+    coolingSlope = np.float64(-deltaT/coolingTime)
+    warmingSlope = np.float64(deltaT/warmingTime)
+    minOmega0 = float("inf")
+    # Initialize data storage arrays
+    omegaTimeValues = []
+    omegaValues = []
+    dayLengthValues = []
+    atmTorqueValues = []
+    lunarTorqueValues = []
+    tempValues = []
+
+    # Current atmospheric column height
+    A24 = Fnaught/(2*rho*Cp*Tnaught) * (4*2*pi/(24*3600)*(2*pi/(24*3600)**2 - omeganaught**2) + \
+        2*pi/(24*3600)/(tau**2)) / (4*(2*pi/(24*3600)**2 - omeganaught**2)**2 + (2*pi/(24*3600)**2)/(tau**2))
+    
+    counter = 0
+    while t <= tmax:
+        if counter == 100 and printTrue:
+            print("Time: %.3f Myr   Omega: %.10f   Day length: %.10f   Temperature: %.10f"\
+                % ((t/(yrsec*1000000)), omega, 2*pi/(3600*omega), T-273))
+            counter = 0
+
+        atmTorqueResults, newT, newh, omega0 = atmTorque(omega, t, tau, deltaT, A24, gamma, deltaOmega, T, h, \
+            snowballTrue, snowballStart, coolingTime, coolingSlope, flatTime, warmingTime, warmingSlope, freq, phi, amp)
+
+        if omega0 < minOmega0:
+            minOmega0 = omega0
+
+        domega = (atmTorqueResults + moonTorque(omega, t, tmax)) / I * tStep 
+
+        atmTorqueValues.append(atmTorqueResults)
+        lunarTorqueValues.append(moonTorque(omega, t, tmax))
+
+        omega += domega                                                 # Increment omega
+        T, h = newT, newh                                               # Update temperature and column height values
+
+        dayLengthValues.append(2*pi/(3600*omega))                       # Store day length
+        omegaValues.append(omega)
+        tempValues.append(T - 273)
+
+        t += tStep                                                      # Increment 
+        counter += 1
+
+    # Plot the day length
+    plotData(dayLengthValues, tempValues, tmax, "Length of Day over Earth's History", \
+        atmTorques = atmTorqueValues, lunarTorques = lunarTorqueValues)
+
+    if dataDump:
+        np.savetxt('DayLengthValues.dat', dayLengthValues[::1000], delimiter = ',', newline = ",")
+        np.savetxt('TempValues.dat', tempValues[::1000], delimiter = ',', newline = ",")
+        np.savetxt('AtmTorqueValues.dat', atmTorqueValues[::1000], delimiter = ',', newline = ",")
+        np.savetxt('LunarTorqueValues.dat', lunarTorqueValues[::1000], delimiter = ',', newline = ",")
+
 
 
 #-----------------------------------------------------------------------------------------------------------------------
@@ -640,8 +764,21 @@ def singleSimulation():
     i=j=k=0
     plotTorque(Q)
     simulate(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, \
-     1.0/5000000, 5, 0, queue, i, j, k, \
+     1.0/5000000, 0, 0, queue, i, j, k, \
      printTrue = True, plotTrue = True, putToQueue = False, snowballTrue = True, isNoise = False)
+
+def historySimulation():
+    '''Invokes the LoD/history generation function.'''
+    # print "Simulating with deltaOmega=" + str(deltaOmega) + ", gamma=" + str(gamma) + "..."
+    queue = multiprocessing.Queue()
+    Q = 100  # Q factor of the atmosphere
+    warmingTime = 5 * 10**7 * yrsec
+    i=j=k=0
+    frequency = np.array([1.0/50000000, 1.0/6000000, 1.0/7000000, 1.0/80000000, 1.0/130000000, 1.0/425400000, \
+        1.0/730000000])
+    lodHistory(deltaOmega, gamma, Q, deltaT, snowballStart, coolingTime, flatTime, warmingTime, \
+     frequency, .5, 0, queue, i, j, k, \
+     printTrue = True, plotTrue = True, putToQueue = False, snowballTrue = True, isNoise = False, dataDump = True)
 
 def singleBinarySearch():
     '''Single binary search implementation for testing purposes.'''
@@ -655,7 +792,8 @@ def singleBinarySearch():
 #-----------------------------------------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    singleSimulation()
+    #singleSimulation()
+    historySimulation()
     #singleBinarySearch()
     #regimeSimulation()
     #noiseRegimeSimulation()
