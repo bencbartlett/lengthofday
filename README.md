@@ -1,6 +1,1 @@
-Geophysical Research Letters:
-"Computational analysis of a Precambrian resonance-stabilized day length"
-Ben Bartlett
-====================
-
-Source code for GRL project - simulation code has been consolodated to the StabilityRegime.py file.
+Accompanying simulation code for [Bartlett and Stevenson (2016) Analysis of a Precambrian resonance-stabilized day length, Geophysical Research Letters.](https://arxiv.org/abs/1502.01421)
